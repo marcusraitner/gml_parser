@@ -1,0 +1,162 @@
+\documentclass[10pt,oneside,a4paper]{article}
+\usepackage{array}
+\title{Scanner and Parser for the GML file format}
+\author{Marcus Raitner \\ raitner@fmi.uni-passau.de}
+\begin{document}
+\maketitle
+\noindent
+This document describes the usage of scanner and parser for the GML file
+format specified in \emph{M. Himsolt, GML: Graph Modelling Language, 
+21.01.1997 available at: 
+http://www.fmi.uni-passau.de/archive/archive.theory/graphlet/GML.ps.gz}
+\section{Data-structures}
+\subsection{... used by the parser}
+The GML format is a list of \textbf{key---value} pairs, represented by the 
+struct \verb+GML_pair+:
+
+\begin{verbatim}
+  struct GML_pair {
+    char* key;
+    GML_value kind;
+    union pair_val value;
+    struct GML_pair* next;
+  };
+\end{verbatim}
+The \verb+key+ entry is the name of this key. 
+The \verb+next+ field allows the usage of the structure as node in a singly 
+linked list. \verb+GML_value kind+ is one of the following values:   
+
+\medskip
+\begin{tabular}{|l|l|} 
+  \hline
+  \verb+GML_INT+ & the value of key is a integer number \\ \hline
+  \verb+GML_DOUBLE+ & the value of key is a floating point number \\ \hline
+  \verb+GML_STRING+ & the value of key is a string \\ \hline
+  \verb+GML_LIST+ & the value of key is a list of \textbf{key---value} 
+  pairs \\
+  \hline
+\end{tabular}
+
+\medskip\noindent
+and determines the type of the \verb+value+ field, i.e. the entry of 
+\verb+pair_val value+, that should be used. Corresponding to 
+the above \verb+pair_val+ is defined as follows:
+
+\begin{verbatim}
+  union pair_val {
+    long integer;
+    double floating;
+    char* string;
+    struct GML_pair* list;
+  };
+\end{verbatim}
+Please notice, that \verb+string+ contains no characters $\geq 160$ because
+these were converted into the \textbf{iso8859-1}-format (e.g. \"a becomes 
+\verb+&auml;+).
+\clearpage\noindent
+In order to report errors from \verb+GML_parser+ to the calling function
+the second argument of \verb+GML_parser+ is a pointer to a
+  
+\begin{verbatim}
+  struct GML_error {
+    GML_error_value err_num;
+    int line;
+    int column;
+  };
+\end{verbatim}
+where \verb+err_num+ is one of the following:
+
+\medskip
+\begin{tabular}{|l|l|}
+  \hline
+  \verb+GML_UNEXPECTED+ & ``wrong'' charcter was found \\ \hline
+  \verb+GML_SYNTAX+ & broken \textbf{key---value} structure \\ \hline
+  \verb+GML_PREMATURE_EOF+ & \verb+EOF+ found while reading a string \\ \hline
+  \verb+GML_TOO_MANY_DIGITS+ & number had too many chars \\ \hline
+  \verb+GML_OPEN_BRACKET+ & at least one bracket not closed at \verb+EOF+
+  \\ \hline
+  \verb+GML_TOO_MANY_BRACKETS+ & too many closing brackets \\ \hline
+  \verb+GML_OK+ & no errors occured \\ \hline
+\end{tabular}
+
+\medskip\noindent
+Line and column contain the position where the error was detected, which is not
+always the exact position of the incorrect term (but in most cases at least 
+line will be right).
+
+\subsection{... used by the scanner}
+
+The scanner returns a 
+
+\begin{verbatim}  
+  struct GML_token { 
+    GML_value kind;
+    union tok_val value;
+  };
+\end{verbatim}
+where \verb+kind+ is one of the following:
+
+\medskip
+\begin{tabular}{|l|l|}
+  \hline
+  \verb+GML_KEY+ & token is the name of a key \\ \hline
+  \verb+GML_INT+ & token is integer number \\ \hline
+  \verb+GML_DOUBLE+ & token is floating point number \\ \hline
+  \verb+GML_STRING+ & token is a string \\ \hline
+  \verb+GML_L_BRACKET+ & token is left bracket (\verb+value+ undefined)\\\hline
+  \verb+GML_R_BARCKET+&token is right bracket (\verb+value+ undefined)\\\hline
+  \verb+GML_END+ & \verb+EOF+ was reached (\verb+value+ undefined) \\ \hline
+  \verb+GML_ERROR+ & an error occured \\ \hline
+\end{tabular}
+
+\medskip\noindent
+The value of \verb+kind+ determines which entry of \verb+value+ to use (if it
+makes sense). The entries of \verb+value+ are defined in
+
+\begin{verbatim}
+  union tok_val {
+    long integer;
+    double floating;
+    char* string;
+    struct GML_error err;
+  };
+\end{verbatim}
+(\verb+string+ is used for both \verb+GML_STRING+ and \verb+GML_KEY+). If an
+error occured, i.e. \verb+kind == GML_ERROR+, \verb+err+ contains its code
+and position as described above. 
+
+\section{Procedures}
+\subsection{The Parser}
+\begin{verbatim}
+struct GML_pair* GML_parser (FILE* f, struct GML_error* e, int op);
+\end{verbatim}
+Preconditions are that \verb+f+ is opened for reading and \verb+e+ is 
+non-nil. The parameter \verb+op+ determines whether a bracket was opened 
+before calling \verb+GML_parser+. Thus a right bracket at the end of the list 
+will cause an \verb+GML_TOO_MANY_BRACKETS+-error if the parser was called with 
+\verb+op = 0+. This means that using the parser will mostly be a matter
+of calling it with \verb+op = 0+ and leaving this feature to the internal 
+recursion. Return value is a list of \verb+GML_pair+. If an error occured, 
+i.e. \verb+e->err_num != GML_OK+, its code and position are stored in err 
+and the returned list only contains what was read up to the error.
+
+\subsection{The Scanner}
+\begin{verbatim}
+struct GML_token GML_scanner (FILE* f);
+\end{verbatim}
+Precondition is that \verb+f+ is opened for reading. The return value is 
+a \verb+GML_token+, which possible values are described above.
+
+\subsection{Others}
+\begin{verbatim}
+void free_list (struct GML_pair* list)
+\end{verbatim}
+Performs free recursivly on all entries of \verb+list+ that were allocated 
+dynamically. 
+\begin{verbatim}
+void print_list (struct GML_pair* list, int level)
+\end{verbatim}
+Writes \verb+list+ to stdout, using \verb+level+ for indentation.
+\end{document}
+
+
